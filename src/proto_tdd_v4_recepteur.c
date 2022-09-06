@@ -1,6 +1,6 @@
 /*************************************************************
 * proto_tdd_v0 -  récepteur                                  *
-* TRANSFERT DE DONNEES  v1                                   *
+* TRANSFERT DE DONNEES  v4                                   *
 *                                                            *
 * Protocole sans contrôle de flux, sans reprise sur erreurs  *
 *                                                            *
@@ -17,9 +17,14 @@
 /* =============================== */
 int main(int argc, char* argv[])
 {
-    unsigned char message[MAX_INFO]; /* message pour l'application */
-    paquet_t paquet; /* paquet utilisé par le protocole */
+
+    paquet_t paquet, ACKpaquet;
+    paquet_t buffer[SEQ_NUM_SIZE];
+
     int fin = 0; /* condition d'arrêt */
+    int borne_inf=0;
+    int verification[SEQ_NUM_SIZE] = {0}; 
+    
 
     init_reseau(RECEPTION);
 
@@ -31,31 +36,36 @@ int main(int argc, char* argv[])
 
         //attendre(); /* optionnel ici car de_reseau() fct bloquante */
         de_reseau(&paquet);
-        
-        /*verification intégrité du paquet*/
+
         if (verifier_controle(paquet) == 1)
         {
-            /*acquittement positif*/
-            paquet.type = ACK;
-        }
-        else{
-            /*acquittement négatif*/
-            paquet.type = NACK;
-        }
+            
+            if (!verification[paquet.num_seq] && dans_fenetre(borne_inf, paquet.num_seq, SEQ_NUM_SIZE/2))
+            {
+                verification[paquet.num_seq] = 1;
+                buffer[paquet.num_seq] = paquet;
+            }
 
+            while (verification[borne_inf])
+            {
 
-        /* extraction des donnees du paquet recu */
-        for (int i=0; i<paquet.lg_info; i++) {
-            message[i] = paquet.info[i];
-        }
-        if (paquet.type == ACK){
-            /* remise des données à la couche application */
-            fin = vers_application(message, paquet.lg_info);
-        }
+                /* remise des données à la couche application */
+                fin = vers_application(buffer[borne_inf].info, buffer[borne_inf].lg_info);
 
-        vers_reseau(&paquet);
+                printf("fin= %d\n",fin);
+                verification[borne_inf] = 0;
+
+                borne_inf = (borne_inf+1)%SEQ_NUM_SIZE;
+
+            }
+            
+            ACKpaquet.num_seq = paquet.num_seq;
+            ACKpaquet.type = ACK;           ACKpaquet.lg_info = 0;
+            ACKpaquet.somme_ctrl = generer_controle(ACKpaquet);
+            
+            vers_reseau(&ACKpaquet);
+        }
     }
-
     printf("[TRP] Fin execution protocole transport.\n");
     return 0;
 }
